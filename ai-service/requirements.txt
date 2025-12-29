@@ -1,0 +1,11 @@
+# Web Framework
+fastapi==0.110.0
+uvicorn==0.29.0
+pydantic==2.7.0
+
+# AI Libraries (Không có torch ở đây)
+transformers==4.40.1
+sentence-transformers==2.7.0
+accelerate==0.29.3
+peft==0.10.0
+numpy==1.26.4
