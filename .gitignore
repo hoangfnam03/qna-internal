@@ -33,7 +33,7 @@ mailpit_data/
 
 # Thư mục map volume chứa model AI trên máy thật
 my_local_models/
-models/
+
 
 ############################################
 # Backend (.NET / Visual Studio)
