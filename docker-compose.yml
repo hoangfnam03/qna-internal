@@ -1,7 +1,26 @@
-version: '3.8'
+version: "3.8"
 
 services:
-  # 1. Vector Database
+  # 0) SQL Server
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: qna_sqlserver
+    environment:
+      - ACCEPT_EULA=Y
+      - MSSQL_SA_PASSWORD=YourStrong!Passw0rd
+    ports:
+      - "1433:1433"
+    volumes:
+      - sql_data:/var/opt/mssql
+    healthcheck:
+      # db ready khi query được
+      test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P 'YourStrong!Passw0rd' -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  # 1) Vector Database
   qdrant:
     image: qdrant/qdrant:latest
     container_name: qna_qdrant
@@ -11,16 +30,16 @@ services:
       - qdrant_data:/qdrant/storage
     restart: unless-stopped
 
-  # 2. Mock Email Server
+  # 2) Mock Email Server
   mailpit:
     image: axllent/mailpit:latest
     container_name: qna_mailpit
     ports:
-      - "1025:1025" # SMTP Port
-      - "8025:8025" # Web UI Port
+      - "1025:1025"
+      - "8025:8025"
     restart: unless-stopped
 
-  # 3. AI Service (Python)
+  # 3) AI Service (Python)
   ai-svc:
     build:
       context: ./ai-service
@@ -29,16 +48,30 @@ services:
       - EMBED_MODEL=intfloat/e5-small-v2
       - LLM_BASE_MODEL=Qwen/Qwen2.5-0.5B-Instruct
       - DEVICE=cpu
-      # QUAN TRỌNG: Chỉ định thư mục cache khớp với volume bên dưới
-      - HF_HOME=/hf-cache 
+      - HF_HOME=/hf-cache
     ports:
       - "8000:8000"
     volumes:
-      # Mount volume vào đường dẫn /hf-cache
       - hf_cache:/hf-cache
     restart: unless-stopped
 
-  # 4. Backend API (.NET)
+  # 4) Migrator (chạy 1 lần rồi thoát)
+  # YÊU CẦU: image webapi đã build ra /app/migrate (EF migrations bundle)
+  migrator:
+    build:
+      context: ./backend
+      dockerfile: WebApi/Dockerfile
+    container_name: qna_migrator
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Server=sqlserver,1433;Database=QnA_Internal;User Id=sa;Password=YourStrong!Passw0rd;TrustServerCertificate=True;Encrypt=False
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    entrypoint: ["/app/migrate"]
+    restart: "no"
+
+  # 5) Backend API (.NET)
   webapi:
     build:
       context: ./backend
@@ -47,40 +80,47 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ASPNETCORE_URLS=http://+:8080
-      
-      # Kết nối đến AI Service (dùng tên service 'ai-svc')
+
+      # SQL
+      - ConnectionStrings__DefaultConnection=Server=sqlserver,1433;Database=QnA_Internal;User Id=sa;Password=YourStrong!Passw0rd;TrustServerCertificate=True;Encrypt=False
+
+      # AI + Qdrant
       - AIService__BaseUrl=http://ai-svc:8000
-      
-      # Kết nối đến Qdrant (dùng tên service 'qdrant')
       - Qdrant__BaseUrl=http://qdrant:6333
       - Qdrant__Collection=kb
       - Qdrant__VectorName=dense_v1
       - Qdrant__TopK=8
-      
-      # Kết nối đến Mailpit (dùng tên service 'mailpit')
+
+      # Mailpit
       - Email__Smtp__Host=mailpit
       - Email__Smtp__Port=1025
       - Email__Smtp__UseSsl=false
-      - Email__Smtp__User=
-      - Email__Smtp__Pass=
       - Email__From=no-reply@qna.local
     ports:
       - "8080:8080"
     depends_on:
-      - qdrant
-      - ai-svc
-      - mailpit
+      migrator:
+        condition: service_completed_successfully
+      qdrant:
+        condition: service_started
+      ai-svc:
+        condition: service_started
+      mailpit:
+        condition: service_started
     restart: unless-stopped
-    
+
+  # 6) FE test (nginx static)
   fe-test:
     build:
       context: ./fe-test
     ports:
       - "8090:80"
     depends_on:
-      - webapi
-      - ai-svc
+      webapi:
+        condition: service_started
+    restart: unless-stopped
 
 volumes:
+  sql_data:
   qdrant_data:
   hf_cache:
