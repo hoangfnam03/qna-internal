@@ -2,7 +2,7 @@ import os
 from typing import List
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
-
+from fastapi.middleware.cors import CORSMiddleware
 import torch
 import numpy as np
 from transformers import AutoTokenizer, AutoModel, AutoModelForCausalLM
@@ -56,6 +56,14 @@ def mean_pool(last_hidden_state: torch.Tensor, attention_mask: torch.Tensor) -> 
 
 
 app = FastAPI(title=APP_NAME)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # dev thôi
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 _device = pick_device()
 _dtype = pick_dtype()

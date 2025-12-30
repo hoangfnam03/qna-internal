@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>QnA BE RAG Test</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 20px; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+    input, textarea, button { font: inherit; }
+    textarea { width: 100%; height: 140px; padding: 10px; }
+    input[type="text"] { width: 420px; padding: 8px; }
+    button { padding: 8px 12px; cursor: pointer; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 14px; margin: 12px 0; }
+    pre { background: #0b1020; color: #e6edf3; padding: 12px; border-radius: 10px; overflow: auto; }
+    .muted { color: #666; }
+    .ok { color: #0a7a2f; }
+    .bad { color: #b00020; }
+  </style>
+</head>
+<body>
+  <h2>QnA BE RAG Test</h2>
+  <p class="muted">FE chỉ gọi BE. BE sẽ tự gọi AI service (/embed + /generate) và Qdrant.</p>
+
+  <div class="card">
+    <div class="row">
+      <label>BE Base URL:</label>
+      <input id="beBase" type="text" value="http://localhost:7100" />
+      <button onclick="pingBE()">Ping /healthz</button>
+      <span id="beInfo" class="muted"></span>
+    </div>
+    <div class="row" style="margin-top:10px;">
+      <label>Bearer token (optional):</label>
+      <input id="token" type="text" placeholder="dán access token nếu endpoint yêu cầu authorize" />
+      <button onclick="saveToken()">Save token</button>
+      <span class="muted">Vào swagger: nhập tk: admin@gmail.com mk: admin123</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>1) Index knowledge (admin)</h3>
+    <p class="muted">Gọi BE để chunk + embed + upsert vào Qdrant.</p>
+    <textarea id="kbText">Quy định nghỉ phép: Mỗi nhân viên có 12 ngày phép/năm. Nghỉ quá 2 ngày liên tiếp phải báo trước 3 ngày làm việc...</textarea>
+    <div class="row" style="margin-top:10px;">
+      <button onclick="indexText()">POST /api/v1/admin/knowledge/index-text</button>
+      <span id="indexLatency" class="muted"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>2) Ask AI (RAG via BE)</h3>
+    <p class="muted">Gọi BE: embed query → search Qdrant → generate.</p>
+    <textarea id="ragQuestion">Nghỉ phép quá 2 ngày thì phải làm gì?</textarea>
+    <div class="row" style="margin-top:10px;">
+      <button onclick="askRag()">POST /api/v1/ai/answer</button>
+      <span id="ragLatency" class="muted"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Output</h3>
+    <pre id="out">{}</pre>
+  </div>
+
+<script>
+  const out = (obj) => {
+    document.getElementById("out").textContent =
+      typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
+  };
+
+  const now = () => performance.now();
+
+  async function safeFetch(url, opts) {
+    const t0 = now();
+    try {
+      const res = await fetch(url, opts);
+      const text = await res.text();
+      let json = null;
+      try { json = text ? JSON.parse(text) : null; } catch {}
+      const ms = Math.round(now() - t0);
+      return { ok: res.ok, status: res.status, ms, json, text };
+    } catch (e) {
+      const ms = Math.round(now() - t0);
+      return { ok: false, status: 0, ms, json: null, text: String(e) };
+    }
+  }
+
+  function beBase() { return document.getElementById("beBase").value.replace(/\/$/, ""); }
+
+  function authHeader() {
+    const token = localStorage.getItem("access_token") || "";
+    return token ? { "Authorization": `Bearer ${token}` } : {};
+  }
+
+  function saveToken() {
+    const t = document.getElementById("token").value.trim();
+    if (t) localStorage.setItem("access_token", t);
+    else localStorage.removeItem("access_token");
+    out({ saved: !!t });
+  }
+
+  async function pingBE() {
+    const r = await safeFetch(beBase() + "/healthz", { method: "GET" });
+    const el = document.getElementById("beInfo");
+    if (r.ok) { el.textContent = `OK (${r.ms}ms)`; el.className="ok"; out(r.json ?? r.text); }
+    else { el.textContent = `FAIL (${r.ms}ms) ${r.text}`; el.className="bad"; out(r); }
+  }
+
+  async function indexText() {
+    const text = document.getElementById("kbText").value;
+    const sourceId = "11111111-1111-1111-1111-111111111111";
+
+    const r = await safeFetch(beBase() + "/api/v1/admin/knowledge/index-text", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeader() },
+      body: JSON.stringify({ sourceType: "Doc", sourceId, text })
+    });
+
+    document.getElementById("indexLatency").textContent = `Latency: ${r.ms}ms, status=${r.status}`;
+    out(r.ok ? r.json : r);
+  }
+
+  async function askRag() {
+    const question = document.getElementById("ragQuestion").value;
+
+    const r = await safeFetch(beBase() + "/api/v1/ai/answer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeader() },
+      body: JSON.stringify({ question })
+    });
+
+    document.getElementById("ragLatency").textContent = `Latency: ${r.ms}ms, status=${r.status}`;
+    out(r.ok ? r.json : r);
+  }
+</script>
+</body>
+</html>

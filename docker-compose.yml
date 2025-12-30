@@ -71,6 +71,15 @@ services:
       - ai-svc
       - mailpit
     restart: unless-stopped
+    
+  fe-test:
+    build:
+      context: ./fe-test
+    ports:
+      - "8090:80"
+    depends_on:
+      - webapi
+      - ai-svc
 
 volumes:
   qdrant_data:

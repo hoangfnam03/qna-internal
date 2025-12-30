@@ -12,8 +12,29 @@ using WebApi.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddControllers();
+// ✅ Force listen đúng port cho FE (nhanh nhất)
+builder.WebHost.UseUrls("http://localhost:7100");
+
+// ✅ Controllers + JSON camelCase để khớp FE
+builder.Services
+    .AddControllers()
+    .AddJsonOptions(o =>
+    {
+        o.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+        o.JsonSerializerOptions.DictionaryKeyPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+    });
+
 builder.Services.AddEndpointsApiExplorer();
+
+// ✅ CORS cho FE (DEV) - bạn có thể siết origin sau
+builder.Services.AddCors(opt =>
+{
+    opt.AddPolicy("DevCors", p => p
+        .AllowAnyOrigin()
+        .AllowAnyHeader()
+        .AllowAnyMethod()
+    );
+});
 
 // Swagger + Bearer
 builder.Services.AddSwaggerGen(c =>
@@ -44,8 +65,6 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 
 builder.Services.AddApplication();
-
-// Infrastructure (DbContext, email, hasher, jwt generator...)
 builder.Services.AddInfrastructure(builder.Configuration);
 
 // JWT Bearer auth
@@ -75,6 +94,11 @@ builder.Services
 builder.Services.AddAuthorization();
 
 var app = builder.Build();
+
+// ✅ CORS phải đặt trước Auth/Authorization
+app.UseCors("DevCors");
+
+// seed DB
 using (var scope = app.Services.CreateScope())
 {
     var sp = scope.ServiceProvider;
